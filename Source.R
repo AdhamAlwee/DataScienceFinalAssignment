@@ -1,167 +1,65 @@
-# Load necessary libraries
 library(shiny)
-library(bslib)
-library(naniar)
-library(VIM)
 library(ggplot2)
-library(recommenderlab) 
-library(caret)
 library(dplyr)
-library(tidyr)  # Added for separate_rows()
-library(stringr)  # Added for text processing
-library(proxy)  # Added for cosine similarity
+library(tidyr)
+library(stringr)
+library(tm)
+library(proxy)
 
-# Get filepath
 setwd("C:/Users/user/OneDrive - Universiti Teknologi PETRONAS/Jan 25/Data Science/Project Assignment/DataScienceFinalAssignment")
 getwd()
+movies_data <- read.csv("datasets/movies.csv")
 
-# URL for folder and filename
-folderpath <- "datasets"
-movies <- "movies.csv"
-
-
-# Function to import CSV files
-import_data <- function(subfolder, filename) {
-  file_path <- file.path(subfolder, filename)  # Construct the relative path
-  data <- read.csv(file_path, stringsAsFactors = FALSE)
-  return(data)
-}
-
-# Import datasets
-movies_data <- import_data(folderpath, movies)
-tags_data <- import_data(folderpath, tags)
-ratings_data <- import_data(folderpath, ratings)
-
-# Function to check missing data
 check_missing_data <- function(data) {
-  if (!is.data.frame(data)) {
-    stop("Input must be a data.frame")
-  }
-  
-  # Count missing values per column
   missing_counts <- colSums(is.na(data))
-  missing_percent <- (missing_counts / nrow(data)) * 100  # Percentage of missing values
-  
-  # Create a summary table
-  missing_summary <- data.frame(
-    Column = names(data),
-    Missing_Values = missing_counts,
-    Missing_Percentage = missing_percent
-  )
-  
-  # Filter only columns with missing values
+  missing_summary <- data.frame(Column = names(data), Missing_Values = missing_counts)
   missing_summary <- missing_summary[missing_summary$Missing_Values > 0, ]
-  
-  # Print summary
-  if (nrow(missing_summary) == 0) {
-    print("No missing values found!")
-  } else {
-    print(missing_summary)
-    
-    # Plot missing data visualization
-    print(gg_miss_var(data))  # naniar visualization
-    aggr(data, col = c("navyblue", "red"), numbers = TRUE, sortVars = TRUE, cex.axis = 0.7, gap = 3, ylab = c("Missing data", "Pattern"))  # VIM visualization
-  }
-  
+  if (nrow(missing_summary) == 0) print("No missing values found!") else print(missing_summary)
   return(missing_summary)
 }
 
-# Function to separate genres and list unique genres
-separate_and_list_genres <- function(data) {
-  if (!"genres" %in% colnames(data)) {
-    stop("The dataset must contain a 'genres' column")
-  }
-  
-  # Separate genres into multiple rows
-  separated_data <- data %>% separate_rows(genres, sep = "\\|")
-  
-  # Get unique genres
-  unique_genres <- unique(separated_data$genres)
-  
-  # Print the unique genres
-  print("Unique Genres:")
-  print(unique_genres)
-  
-  return(list(separated_data = separated_data, unique_genres = unique_genres))
-}
+check_missing_data(movies_data)
 
-# Function to recommend movies based on genre similarity using cosine similarity
-recommend_movies <- function(data, movie_title, num_recommendations = 10) {
+# Function to recommend movies using TF-IDF
+recommend_movies_tfidf <- function(data, movie_title, num_recommendations = 10) {
   if (!"title" %in% colnames(data) || !"genres" %in% colnames(data)) {
     stop("The dataset must contain 'title' and 'genres' columns")
   }
   
-  # Separate genres into multiple rows
-  data <- data %>% separate_rows(genres, sep = "\\|")
+  # Create a corpus from genres
+  corpus <- VCorpus(VectorSource(data$genres))
   
-  # Create a binary matrix for genres
-  genre_matrix <- data %>%
-    mutate(value = 1) %>%
-    spread(key = genres, value = value, fill = 0)
+  # Apply TF-IDF transformation
+  dtm <- TermDocumentMatrix(corpus, control = list(weighting = weightTfIdf))
+  tfidf_matrix <- t(as.matrix(dtm))  # Transpose so movies are rows
   
-  # Remove duplicate movie titles
-  genre_matrix <- genre_matrix %>% group_by(title) %>% summarise(across(where(is.numeric), max))
+  # Ensure movie titles match the TF-IDF matrix order
+  if (nrow(tfidf_matrix) != nrow(data)) {
+    stop("Mismatch: TF-IDF matrix and dataset row counts differ.")
+  }
+  rownames(tfidf_matrix) <- data$title  # Assign movie titles as row names
   
   # Find the index of the input movie
-  movie_index <- which(genre_matrix$title == movie_title)
+  movie_index <- which(rownames(tfidf_matrix) == movie_title)
   if (length(movie_index) == 0) {
     stop("Movie not found in dataset")
   }
   
   # Compute cosine similarity
-  similarity_scores <- proxy::dist(genre_matrix[,-1], method = "cosine")
+  similarity_scores <- proxy::dist(tfidf_matrix, method = "cosine")
+  similarity_matrix <- as.matrix(similarity_scores)  # Convert to matrix
   
-  # Extract the similarity scores for the input movie
-  movie_similarities <- similarity_scores[movie_index, ]
+  # Extract similarity scores for the input movie
+  movie_similarities <- similarity_matrix[movie_index, , drop = FALSE]
   
-  # Get top recommendations
-  recommendations <- genre_matrix$title[order(movie_similarities)[2:(num_recommendations + 1)]]
+  # Get top recommendations (excluding the input movie itself)
+  recommended_indices <- order(movie_similarities)[2:(num_recommendations + 1)]
+  recommendations <- rownames(tfidf_matrix)[recommended_indices]
   
   print("Recommended Movies:")
-  print(recommendations)
   
   return(recommendations)
 }
 
-# Function to calculate RMSE
-evaluate_rmse <- function(actual_ratings, predicted_ratings) {
-  sqrt(mean((actual_ratings - predicted_ratings)^2, na.rm = TRUE))
-}
-
-# Function to calculate Precision and Recall
-evaluate_precision_recall <- function(recommended_movies, actual_movies) {
-  true_positives <- sum(recommended_movies %in% actual_movies)
-  precision <- true_positives / length(recommended_movies)
-  recall <- true_positives / length(actual_movies)
-  return(list(precision = precision, recall = recall))
-}
-
-# Shiny App UI and Server
-ui <- fluidPage(
-  titlePanel("Movie Recommendation System"),
-  sidebarLayout(
-    sidebarPanel(
-      textInput("movie_title", "Enter Movie Title:", "Toy Story (1995)"),
-      numericInput("num_recommendations", "Number of Recommendations:", 10, min = 1, max = 20),
-      actionButton("recommend", "Get Recommendations")
-    ),
-    mainPanel(
-      verbatimTextOutput("recommendation_output")
-    )
-  )
-)
-
-server <- function(input, output) {
-  observeEvent(input$recommend, {
-    recommendations <- recommend_movies(movies_data, input$movie_title, input$num_recommendations)
-    output$recommendation_output <- renderPrint(recommendations)
-  })
-}
-
-shinyApp(ui, server)
-
-# Deployment Steps to shinyapps.io:
-# 1. Install rsconnect: install.packages("rsconnect")
-# 2. Load rsconnect: library(rsconnect)
-# 3. Authenticate account: rsconnect::setAccountInfo(name='yourname', token='yourtoken', secret='yoursecret')
-# 4. Deploy the app: rsconnect::deployApp("path/to/your/app/directory")
+# Example usage
+recommend_movies_tfidf(movies_data, "Toy Story (1995)", 2)
