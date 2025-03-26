@@ -3,13 +3,16 @@ library(ggplot2)
 library(dplyr)
 library(tidyr)
 library(stringr)
+library(tm)
+library(proxy)
+
 library(tidyverse)
 
 # Load datasets
-ratings <- read.csv('/mnt/data/ratings.csv')
-movies <- read.csv('/mnt/data/movies.csv')
-links <- read.csv('/mnt/data/links.csv')
-tags <- read.csv('/mnt/data/tags.csv')
+ratings <- read.csv('ratings/movies.csv')
+movies <- read.csv('datasets/movies.csv')
+links <- read.csv('links/movies.csv')
+tags <- read.csv('tags/movies.csv')
 
 check_missing_data <- function(data) {
   missing_counts <- colSums(is.na(data))
@@ -34,86 +37,69 @@ rating_matrix <- ratings %>%
   column_to_rownames('userId')
 rating_matrix[is.na(rating_matrix)] <- 0
 
-# Split data into training and testing (80-20 split)
-set.seed(123)
-test_indices <- sample(1:nrow(ratings), size = 0.2 * nrow(ratings))
-test_set <- ratings[test_indices, ]
-train_set <- ratings[-test_indices, ]
-
 # User-based Collaborative Filtering Function
-get_recommendations <- function(movie_name, user_rating, num_recommendations) {
+get_recommendations <- function(movie_name, user_rating) {
+  # Get movieId for the input movie
   movie_id <- movies %>% filter(str_detect(title, regex(movie_name, ignore_case = TRUE))) %>% pull(movieId)
-  if (length(movie_id) == 0) return('Movie not found.')
+  if (length(movie_id) == 0) {
+    return('Movie not found.')
+  }
+  
+  # Find users who rated the movie similarly
   similar_users <- ratings %>%
     filter(movieId %in% movie_id & rating >= user_rating - 0.5 & rating <= user_rating + 0.5) %>%
     pull(userId) %>%
     unique()
-  if (length(similar_users) == 0) return('No similar users found.')
+  
+  if (length(similar_users) == 0) {
+    return('No similar users found.')
+  }
+  
+  # Get highly rated movies from similar users
   recommendations <- ratings %>%
     filter(userId %in% similar_users) %>%
     group_by(movieId) %>%
     summarize(avg_rating = mean(rating), .groups = 'drop') %>%
     arrange(desc(avg_rating)) %>%
-    head(num_recommendations) %>%
-    left_join(movies, by = 'movieId') %>%
-    select(title, avg_rating)
+    head(10) %>%
+    left_join(movies, by = c('movieId' = 'movieId')) %>%
+    pull(title)
+  
   return(recommendations)
 }
 
-# Shiny App for Visualization
-ui <- fluidPage(
-  titlePanel('Movie Recommendation System'),
-  sidebarLayout(
-    sidebarPanel(
-      textInput('movie_name', 'Enter Movie Name:', value = 'Toy Story'),
-      numericInput('user_rating', 'Enter Your Rating (1-5):', value = 4.5, min = 0.5, max = 5, step = 0.5),
-      actionButton('recommend_btn', 'Get Recommendations')
-    ),
-    mainPanel(
-      div(style = 'margin-bottom: 20px; border: 2px solid #4CAF50; padding: 10px; background-color: #f0f8ff; font-weight: bold; text-align: center;', textOutput('rmse_value')),
-      plotOutput('recommendation_plot'),
-      tableOutput('recommendation_table')
-    )
-  )
-)
-
-server <- function(input, output) {
-  rv <- reactiveValues(rmse_value = NULL)
+# Item-based Collaborative Filtering Function
+get_item_based_recommendations <- function(movie_name) {
+  # Get movieId for the input movie
+  movie_id <- movies %>% filter(str_detect(title, regex(movie_name, ignore_case = TRUE))) %>% pull(movieId)
+  if (length(movie_id) == 0) {
+    return('Movie not found.')
+  }
   
-  observeEvent(input$recommend_btn, {
-    predicted_ratings <- test_set %>%
-      group_by(userId, movieId) %>%
-      summarize(pred_rating = mean(input$user_rating), .groups = 'drop')
-    rv$rmse_value <- sqrt(mean((test_set$rating - as.numeric(predicted_ratings$pred_rating)) ^ 2, na.rm = TRUE))
-  })
+  # Find similar movies based on user ratings
+  movie_ratings <- rating_matrix[, as.character(movie_id), drop = FALSE]
+  similarity_scores <- cor(rating_matrix, movie_ratings, use = 'pairwise.complete.obs')
+  similarity_scores <- as.data.frame(similarity_scores)
+  similarity_scores$movieId <- as.integer(rownames(similarity_scores))
+  similarity_scores <- similarity_scores %>% arrange(desc(similarity_scores[, 1]))
   
-  output$rmse_value <- renderText({
-    if (!is.null(rv$rmse_value)) {
-      paste('RMSE:', round(rv$rmse_value, 4))
-    } else {
-      'Click the button to calculate RMSE'
-    }
-  })
+  # Get top 10 similar movies excluding the input movie
+  top_movies <- similarity_scores %>% filter(movieId != movie_id) %>% head(10) %>% pull(movieId)
+  recommendations <- movies %>% filter(movieId %in% top_movies) %>% pull(title)
   
-  recommendations <- eventReactive(input$recommend_btn, {
-    get_recommendations(input$movie_name, input$user_rating, 10)
-  })
-  
-  output$recommendation_table <- renderTable({
-    recommendations()
-  })
-  
-  output$recommendation_plot <- renderPlot({
-    recs <- recommendations()
-    if (!is.null(recs) && nrow(recs) > 0) {
-      ggplot(recs, aes(x = reorder(title, avg_rating), y = avg_rating)) +
-        geom_bar(stat = 'identity', fill = 'steelblue') +
-        coord_flip() +
-        labs(title = 'Top 10 Recommended Movies',
-             x = 'Movies', y = 'Average Rating') +
-        theme_minimal()
-    }
-  })
+  return(recommendations)
 }
 
-shinyApp(ui, server)
+#Example user input
+movie_input <- 'Toy Story'
+user_rating <- 4.5
+
+# Example usage for User-based
+user_recommendations <- get_recommendations(movie_input, user_rating)
+print(paste('Recommendations based on', movie_input, 'with rating', user_rating, ':'))
+print(user_recommendations)
+
+# Example usage for Item-based
+item_recommendations <- get_item_based_recommendations(movie_input)
+cat('Item-based Recommendations for movies similar to', movie_input, ':\n')
+print(item_recommendations)
