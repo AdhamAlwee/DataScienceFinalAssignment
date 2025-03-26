@@ -9,6 +9,7 @@ library(proxy)
 setwd("C:/Users/user/OneDrive - Universiti Teknologi PETRONAS/Jan 25/Data Science/Project Assignment/DataScienceFinalAssignment")
 getwd()
 movies_data <- read.csv("datasets/movies.csv")
+ratings_data <- read.csv("datasets/ratings.csv")
 
 check_missing_data <- function(data) {
   missing_counts <- colSums(is.na(data))
@@ -61,5 +62,45 @@ recommend_movies_tfidf <- function(data, movie_title, num_recommendations = 10) 
   return(recommendations)
 }
 
+calculate_precision_recall <- function(recommendations, ratings_data, movies_data, threshold = 4.0) {
+  # Merge ratings_data with movies_data to get movie titles
+  ratings_with_titles <- merge(ratings_data, movies_data, by = "movieId")
+  
+  # Display recommended movies before evaluation
+  print("Recommended Movies Before Evaluation:")
+  print(recommendations)
+  
+  # Extract movies with ratings >= threshold
+  relevant_movies <- ratings_with_titles[ratings_with_titles$rating >= threshold, "title"]
+  
+  # Handle case where no relevant movies exist
+  if (length(relevant_movies) == 0) {
+    warning("No movies meet the rating threshold. Recall is set to NA.")
+    recall <- NA
+  } else {
+    retrieved_relevant <- sum(recommendations %in% relevant_movies)
+    recall <- retrieved_relevant / length(relevant_movies)
+  }
+  
+  # Handle case where no recommendations are made
+  if (length(recommendations) == 0) {
+    warning("No recommendations were made. Precision is set to NA.")
+    precision <- NA
+  } else {
+    retrieved_relevant <- sum(recommendations %in% relevant_movies)
+    precision <- retrieved_relevant / length(recommendations)
+  }
+  
+  return(list(precision = precision, recall = recall))
+}
+
 # Example usage
-recommend_movies_tfidf(movies_data, "Toy Story (1995)", 2)
+recommendations <- recommend_movies_tfidf(movies_data, "Toy Story (1995)", 5)
+print(recommendations)
+
+precision_recall <- calculate_precision_recall(recommendations, ratings_data, movies_data)
+print(precision_recall)
+
+
+
+
