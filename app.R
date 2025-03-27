@@ -8,7 +8,7 @@ library(proxy)
 library(bslib)
 library(rsconnect)
 
-setwd("C:/Users/user/OneDrive - Universiti Teknologi PETRONAS/Jan 25/Data Science/Project Assignment/DataScienceFinalAssignment")
+setwd("C:/Users/user/Desktop/DataScienceFinalAssignment")
 getwd()
 movies_data <- read.csv("datasets/movies.csv")
 ratings_data <- read.csv("datasets/ratings.csv")
