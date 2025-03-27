@@ -40,7 +40,7 @@ recommend_movies_tfidf <- function(data, movie_title, num_recommendations = 10) 
 }
 
 # Function to calculate precision and recall
-calculate_precision_recall <- function(recommendations, ratings_data, movies_data, threshold = 2.0) {
+calculate_precision_recall <- function(recommendations, ratings_data, movies_data, threshold = 4.0) {
   if (length(recommendations) == 0) return(list(precision = NA, recall = NA))
   
   relevant_movies <- ratings_data[rating >= threshold, unique(movieId)]
