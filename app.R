@@ -1,3 +1,4 @@
+options(shinyapps.http.response.timeout = 1000)
 library(shiny)
 library(ggplot2)
 library(dplyr)
@@ -8,10 +9,9 @@ library(proxy)
 library(bslib)
 library(rsconnect)
 
-setwd("C:/Users/user/Desktop/DataScienceFinalAssignment")
-getwd()
-movies_data <- read.csv("datasets/movies.csv")
-ratings_data <- read.csv("datasets/ratings.csv")
+
+movies_data <- read.csv("movies.csv")
+ratings_data <- read.csv("ratings.csv")
 
 # Function to check missing data
 check_missing_data <- function(data) {
@@ -150,7 +150,7 @@ calculate_precision_recall <- function(recommendations, ratings_data, movies_dat
 }
 
 # Example usage
-recommendations <- recommend_movies_tfidf(movies_data, "Toy Story (1995)", 5)
+recommendations <- recommend_movies_tfidf(movies_data, "Toy Story (1995)",2)
 print(recommendations)
 
 precision_recall <- calculate_precision_recall(recommendations, ratings_data, movies_data)
