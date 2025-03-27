@@ -5,12 +5,15 @@ library(tidyr)
 library(stringr)
 library(tm)
 library(proxy)
+library(bslib)
+library(rsconnect)
 
 setwd("C:/Users/user/OneDrive - Universiti Teknologi PETRONAS/Jan 25/Data Science/Project Assignment/DataScienceFinalAssignment")
 getwd()
 movies_data <- read.csv("datasets/movies.csv")
 ratings_data <- read.csv("datasets/ratings.csv")
 
+# Function to check missing data
 check_missing_data <- function(data) {
   missing_counts <- colSums(is.na(data))
   missing_summary <- data.frame(Column = names(data), Missing_Values = missing_counts)
@@ -19,7 +22,59 @@ check_missing_data <- function(data) {
   return(missing_summary)
 }
 
+# Function to check duplicate rows in the dataset
+check_duplicates <- function(data, key_columns) {
+  duplicate_rows <- data %>% 
+    group_by(across(all_of(key_columns))) %>% 
+    filter(n() > 1)
+  
+  if (nrow(duplicate_rows) == 0) {
+    print("No duplicate rows found!")
+  } else {
+    print(paste("Number of duplicate rows:", nrow(duplicate_rows)))
+    print(head(duplicate_rows))
+  }
+  return(duplicate_rows)
+}
+
+# Check missing values and duplicates in datasets
 check_missing_data(movies_data)
+check_missing_data(ratings_data)
+check_duplicates(movies_data, c("movieId", "title"))
+check_duplicates(ratings_data, c("userId", "movieId", "rating"))
+
+
+#most common genre
+genre_analysis <- movies_data %>%
+  separate_rows(genres, sep = "\\|") %>%
+  count(genres, sort = TRUE)
+ggplot(genre_analysis, aes(x = reorder(genres, n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Common Movie Genres", x = "Genre", y = "Count")
+
+# Function to analyze distribution of movies by release year
+movies_data$year <- as.numeric(str_extract(movies_data$title, "\\d{4}(?=\\))"))
+year_distribution <- movies_data %>% count(year)
+ggplot(year_distribution, aes(x = year, y = n)) +
+  geom_line(color = "blue") +
+  labs(title = "Number of Movies Released Per Year", x = "Year", y = "Count")
+
+# Function to analyze distribution of ratings
+rating_distribution <- ratings_data %>% count(rating)
+ggplot(rating_distribution, aes(x = rating, y = n)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(title = "Distribution of Ratings", x = "Rating", y = "Count")
+
+# Function to find most-rated movies
+most_rated_movies <- ratings_data %>%
+  count(movieId, sort = TRUE) %>%
+  top_n(10, n) %>%
+  left_join(movies_data, by = "movieId")
+ggplot(most_rated_movies, aes(x = reorder(title, n), y = n)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  coord_flip() +
+  labs(title = "Top 10 Most-Rated Movies", x = "Movie", y = "Number of Ratings")
 
 # Function to recommend movies using TF-IDF
 recommend_movies_tfidf <- function(data, movie_title, num_recommendations = 10) {
@@ -101,6 +156,62 @@ print(recommendations)
 precision_recall <- calculate_precision_recall(recommendations, ratings_data, movies_data)
 print(precision_recall)
 
+ui <- fluidPage(
+  titlePanel("Movie Data Analysis"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("selected_movie", "Choose a Movie:", choices = unique(movies_data$title)),
+      numericInput("num_recommendations", "Number of Recommendations:", value = 5, min = 1, max = 20),
+      actionButton("recommend", "Get Recommendations"),
+      textOutput("precision_recall")
+    ),
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Most Common Genres", plotOutput("genrePlot")),
+        tabPanel("Movies Per Year", plotOutput("yearPlot")),
+        tabPanel("Ratings Distribution", plotOutput("ratingPlot")),
+        tabPanel("Most Rated Movies", plotOutput("mostRatedPlot")),
+        tabPanel("Recommendations", verbatimTextOutput("recommendationOutput"))
+      )
+    )
+  )
+)
 
+server <- function(input, output) {
+  output$genrePlot <- renderPlot({
+    ggplot(genre_analysis, aes(x = reorder(genres, n), y = n)) +
+      geom_bar(stat = "identity", fill = "steelblue") +
+      coord_flip() +
+      labs(title = "Most Common Movie Genres", x = "Genre", y = "Count")
+  })
+  
+  output$yearPlot <- renderPlot({
+    ggplot(year_distribution, aes(x = year, y = n)) +
+      geom_line(color = "blue") +
+      labs(title = "Number of Movies Released Per Year", x = "Year", y = "Count")
+  })
+  
+  output$ratingPlot <- renderPlot({
+    ggplot(rating_distribution, aes(x = rating, y = n)) +
+      geom_bar(stat = "identity", fill = "red") +
+      labs(title = "Distribution of Ratings", x = "Rating", y = "Count")
+  })
+  
+  output$mostRatedPlot <- renderPlot({
+    ggplot(most_rated_movies, aes(x = reorder(title, n), y = n)) +
+      geom_bar(stat = "identity", fill = "purple") +
+      coord_flip() +
+      labs(title = "Top 10 Most-Rated Movies", x = "Movie", y = "Number of Ratings")
+  })
+  
+  observeEvent(input$recommend, {
+    recommendations <- recommend_movies_tfidf(movies_data, input$selected_movie, input$num_recommendations)
+    output$recommendationOutput <- renderText({ paste("Recommended Movies:", paste(recommendations, collapse = ", ")) })
+    
+    precision_recall <- calculate_precision_recall(recommendations, ratings_data, movies_data)
+    output$precision_recall <- renderText({ paste("Precision:", precision_recall$precision, "Recall:", precision_recall$recall) })
+  })
+}
 
+shinyApp(ui, server)
 
